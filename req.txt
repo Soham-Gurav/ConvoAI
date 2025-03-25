@@ -1,0 +1,7 @@
+Flask==2.3.2
+Flask-SocketIO==5.3.6
+google-generativeai==0.3.2
+gTTS==2.4.0
+sounddevice==0.4.6
+soundfile==0.12.1
+numpy>=1.26.0

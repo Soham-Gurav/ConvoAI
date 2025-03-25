@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Agent AI</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <div id="chat">
+        <h1>Voice Agent AI</h1>
+        <div id="messages"></div>
+        <input type="text" id="user_input" placeholder="Type your message...">
+        <button id="send_button">Send Message</button>
+        <button id="speak_button">Speak</button>
+        <button id="call_button">Start Call</button>
+
+        <!-- System Prompt Dropdown -->
+        <label for="system_prompt">Select Agent:</label>
+        <select id="system_prompt">
+            <option value="default">Default</option>
+            <option value="pizza_salesman">Pizza Salesman</option>
+            <option value="lg_instructor">LG Instructor</option>
+            <option value="google_interviewer">Google Interviewer</option>
+        </select>
+
+        <!-- Knowledge Base Selection (Always Visible, but Disabled for Default) -->
+        <label for="kb_select">Select Knowledge Base:</label>
+        <select id="kb_select">
+            <option value="lg_customer_support">LG Customer Support</option>
+            <option value="pizza_menu">Pizza Salesman</option>
+            <option value="interviewer">Google Interviewer</option>
+        </select>
+        <button id="set_kb_button">Set Knowledge Base</button>
+
+        <!-- Analyze Call Button -->
+        <button id="analyze_button">Analyze Call</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+
+    <script>
+        // Get dropdown and button elements
+        const systemPrompt = document.getElementById("system_prompt");
+        const kbSelect = document.getElementById("kb_select");
+        const setKbButton = document.getElementById("set_kb_button");
+
+        // Enable or disable KB selection based on agent selection
+        systemPrompt.addEventListener("change", () => {
+            if (systemPrompt.value === "default") {
+                kbSelect.disabled = true;
+                setKbButton.disabled = true;
+            } else {
+                kbSelect.disabled = false;
+                setKbButton.disabled = false;
+            }
+        });
+
+        // Set KB Button Event
+        setKbButton.addEventListener("click", () => {
+            const kbFolder = kbSelect.value;
+            fetch("/set_knowledge_base", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ kb_folder: kbFolder })
+            })
+                .then(response => response.json())
+                .then(data => alert(data.message))
+                .catch(error => console.error("Error setting knowledge base:", error));
+        });
+    </script>
+</body>
+</html>

@@ -29,7 +29,7 @@ socketio = SocketIO(app)
 #nltk.download('punkt')
 
 # Configure Gemini
-API_KEY = ""        # Replace with your actual API key
+API_KEY = "AIzaSyB6Kr5V4TIwXSUqfUZMWE_xAS0t7tn8lgY"        # Replace with your actual API key
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel("gemini-2.0-flash")
 
@@ -46,7 +46,7 @@ current_kb_folder = None
 query_engine = None
 
 END_CALL_PHRASES = [
-    "thanks for helping", "no more questions", "goodbye", "that's all", "i'm done", "end call"
+    "thanks for helping", "no more questions", "goodbye", "that's all", "i'm done", "end call","thank you"
 ]
 
 def get_next_session_number():
@@ -83,9 +83,9 @@ def home():
 
 @socketio.on("start_call")
 def handle_start_call():
-    """Start a new call session."""
-    global current_session_folder
+    global current_session_folder, conversation_history
     current_session_folder = create_session_folder()
+    conversation_history = []  # Reset history
     socketio.emit("session_started", {"session": current_session_folder})
     print(f"✅ Call started in session: {current_session_folder}")
 
@@ -148,10 +148,19 @@ def handle_general_query(query):
             return response.text
     return None
 
+# Add this at the top with other global variables
+conversation_history = {}
+
 @socketio.on("user_message")
 def handle_message(data):
-    global current_session_folder, query_engine, current_kb_folder
-    user_input = data["message"].strip().lower()
+    global current_session_folder, query_engine, current_kb_folder, conversation_history
+    
+    # Get session ID or create one
+    session_id = data.get("session_id") or current_session_folder or create_session_folder()
+    if session_id not in conversation_history:
+        conversation_history[session_id] = []
+
+    user_input = data["message"].strip()
     mode = data["mode"]  # "text" or "call"
     system_prompt = data.get("systemPrompt", "default")
 
@@ -159,8 +168,9 @@ def handle_message(data):
         print("❌ Empty user input received. Skipping AI response.")
         return
 
-    if any(phrase in user_input for phrase in END_CALL_PHRASES):
+    if any(phrase.lower() in user_input.lower() for phrase in END_CALL_PHRASES):
         socketio.emit("call_ended", {"message": "Call has been ended by the user."})
+        conversation_history.pop(session_id, None)  # Clear session history
         print("✅ Call ended by user request.")
         return
 
@@ -178,9 +188,47 @@ def handle_message(data):
         socketio.emit("ai_response", {"message": ai_response, "mode": mode})
         return
 
-    prompt = f"{SYSTEM_PROMPTS[system_prompt]}\n\nUser Query: {user_input}\n\nProvide a response:"
-    response = model.generate_content(prompt)
-    ai_response = response.text
+    # Build context-aware prompt
+    context = "\n".join(
+        f"User: {msg['user']}\nAI: {msg['ai']}" 
+        for msg in conversation_history[session_id][-3:]  # Keep last 3 exchanges
+    )
+    
+    prompt = f"""
+    {SYSTEM_PROMPTS[system_prompt]}
+    
+    Current Conversation Context:
+    {context}
+    
+    Important Instructions:
+    1. DO NOT reintroduce yourself unless explicitly asked
+    2. DO NOT repeat information already shared
+    3. Follow the system prompts provided earlier
+
+    New User Message: {user_input}
+    
+    Your response (follow script strictly):
+    """
+    
+    try:
+        response = model.generate_content(prompt)
+        ai_response = response.text
+        
+        # Clean up any accidental script deviations
+        if "script" in SYSTEM_PROMPTS[system_prompt].lower():
+            if "hello" in ai_response.lower() and any("hello" in msg["ai"].lower() for msg in conversation_history[session_id]):
+                ai_response = ai_response.replace("Hello", "").replace("Hi there", "").strip()
+        
+    except Exception as e:
+        print(f"❌ Error generating response: {e}")
+        ai_response = "I'm having trouble responding. Could you please repeat that?"
+
+    # Save to conversation history
+    conversation_history[session_id].append({
+        "user": user_input,
+        "ai": ai_response,
+        "timestamp": datetime.now().isoformat()
+    })
 
     save_conversation(user_input, ai_response, mode)
     
@@ -190,10 +238,15 @@ def handle_message(data):
             socketio.emit("ai_response", {
                 "message": ai_response, 
                 "audio_file": f"/static/{audio_file}",
-                "mode": mode
+                "mode": mode,
+                "session_id": session_id
             })
     else:
-        socketio.emit("ai_response", {"message": ai_response, "mode": mode})
+        socketio.emit("ai_response", {
+            "message": ai_response, 
+            "mode": mode,
+            "session_id": session_id
+        })
 
 def save_conversation(user_input, ai_response, mode):
     """Save conversation history."""
@@ -239,7 +292,7 @@ def save_user_audio():
             "-ac", "1",  # Mono channel
             final_mp3_path
         ], check=True)
-        
+       
         # 3. Clean up temporary WAV
         os.remove(temp_wav_path)
         
@@ -507,7 +560,94 @@ def analyze_call():
         error_msg = f"Error analyzing call: {str(e)}"
         print(error_msg)
         return jsonify({"error": error_msg}), 500
+
+@app.route("/generate_call_summary", methods=["POST"])
+def generate_call_summary():
+    """Generate a comprehensive call summary using Gemini."""
+    global current_session_folder
     
+    if not current_session_folder:
+        return jsonify({"error": "No active session to analyze"}), 400
+    
+    try:
+        # First get the basic analysis data
+        basic_analysis = perform_basic_analysis(current_session_folder)
+        if "error" in basic_analysis:
+            return jsonify(basic_analysis), 400
+        
+        # Format the transcript for Gemini
+        formatted_transcript = format_transcript_for_gemini(basic_analysis["transcript"])
+        
+        # Generate the comprehensive summary
+        summary = generate_comprehensive_summary(
+            transcript=formatted_transcript,
+            sentiment_data=basic_analysis["sentiment"],
+            speaker_times=basic_analysis["speaker_times"],
+            word_counts=basic_analysis["word_counts"],
+            topics=basic_analysis["topics"]
+        )
+        
+        return jsonify({
+            "status": "success",
+            "summary": summary,
+        })
+    
+    except Exception as e:
+        error_msg = f"Error generating call summary: {str(e)}"
+        print(error_msg)
+        return jsonify({"error": error_msg}), 500
+
+def perform_basic_analysis(session_folder):
+    """Perform the same analysis as analyze_call but ensure a dictionary is returned."""
+    response = analyze_call()  # This returns a Flask Response object
+    if isinstance(response, tuple):  # Handle Flask (response, status_code) format
+        response = response[0]
+    return response.get_json()  # Ensure we return a dictionary, not a Flask response
+
+
+def format_transcript_for_gemini(transcript):
+    """Format the transcript for Gemini input."""
+    return "\n".join(
+        f"{turn['speaker'].upper()}: {turn['text']} ({turn['time']:.1f}s)"
+        for turn in transcript
+    )
+
+def generate_comprehensive_summary(transcript, sentiment_data, speaker_times, word_counts, topics):
+    """Generate comprehensive summary using Gemini."""
+    prompt = f"""
+    Analyze this customer service call and provide a professional summary in paragraph form.
+    Include key insights about:
+
+    1. The nature and purpose of the call
+    2. Customer sentiment and emotional tone
+    3. Speaking dynamics between participants
+    4. Main topics discussed
+    5. Any recommendations for follow-up
+
+    --- TRANSCRIPT ---
+    {transcript}
+
+    --- SUPPORTING DATA ---
+    Sentiment Analysis:
+    - Positive turns: {sentiment_data['positive']}
+    - Neutral turns: {sentiment_data['neutral']}
+    - Negative turns: {sentiment_data['negative']}
+    - Overall sentiment score: {sentiment_data['overall_sentiment']:.2f}
+
+    Speaking Times:
+    - Customer: {speaker_times['user']:.1f} seconds
+    - Agent: {speaker_times['ai']:.1f} seconds
+
+    Word Counts:
+    - Customer: {word_counts['user']} words
+    - Agent: {word_counts['ai']} words
+
+    Top Topics: {', '.join(topics.keys())}
+    """
+    
+    response = model.generate_content(prompt)
+    return response.text
+
 if __name__ == "__main__":
-    socketio.run(app, debug=True, port=5001)
-    
+    app.run(debug=True)
+    socketio.run(app, debug=True, port=5000)

@@ -4,7 +4,6 @@ const socket = io();
 const messagesDiv = document.getElementById("messages");
 const userInput = document.getElementById("user_input");
 const sendButton = document.getElementById("send_button");
-const speakButton = document.getElementById("speak_button");
 const callButton = document.getElementById("call_button");
 const setKbButton = document.getElementById("set_kb_button");
 const kbSelect = document.getElementById("kb_select");
@@ -207,16 +206,6 @@ sendButton.addEventListener("click", () => {
     }
 });
 
-// Speak button
-speakButton.addEventListener("click", () => {
-    if (recognition) {
-        recognition.start();
-        console.log("🎤 Listening for speech input...");
-    } else {
-        console.log("❌ Speech recognition not supported.");
-    }
-});
-
 setKbButton.addEventListener("click", () => {
     const kbFolder = kbSelect.value;
     fetch("/set_knowledge_base", {
@@ -230,6 +219,7 @@ setKbButton.addEventListener("click", () => {
 });
 
 // Analyze Call button
+/*
 document.getElementById("analyze_button").addEventListener("click", () => {
     fetch("/analyze_call", {
         method: "POST",
@@ -290,6 +280,95 @@ document.getElementById("analyze_button").addEventListener("click", () => {
         // Close button functionality
         modal.querySelector('.close').addEventListener('click', () => {
             document.body.removeChild(modal);
+        });
+    })
+    .catch(error => {
+        console.error("Error analyzing call:", error);
+        alert("Error analyzing call. See console for details.");
+    });
+});
+*/
+// Analyze Call button
+document.getElementById("analyze_button").addEventListener("click", () => {
+    fetch("/analyze_call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            alert(`Error: ${data.error}`);
+            return;
+        }
+        
+        // Fetch the summary after analysis
+        fetch("/generate_call_summary", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" }
+        })
+        .then(response => response.json())
+        .then(summaryData => {
+            if (summaryData.error) {
+                alert(`Error: ${summaryData.error}`);
+                return;
+            }
+            
+            // Display analysis results in a formatted way
+            const analysisResults = `
+                <h3>Call Analysis Results</h3>
+                <h4>Transcript Summary</h4>
+                <p>Total turns: ${data.transcript.length}</p>
+                <p>User speaking time: ${data.speaker_times.user.toFixed(1)}s</p>
+                <p>AI speaking time: ${data.speaker_times.ai.toFixed(1)}s</p>
+                
+                <h4>Sentiment Analysis</h4>
+                <p>Positive turns: ${data.sentiment.positive}</p>
+                <p>Neutral turns: ${data.sentiment.neutral}</p>
+                <p>Negative turns: ${data.sentiment.negative}</p>
+                <p>Overall sentiment: ${data.sentiment.overall_sentiment.toFixed(2)}</p>
+                
+                <h4>Word Count</h4>
+                <p>User words: ${data.word_counts.user}</p>
+                <p>AI words: ${data.word_counts.ai}</p>
+                
+                <h4>Top Topics</h4>
+                <ul>
+                    ${Object.entries(data.topics).map(([topic, count]) => 
+                        `<li>${topic}: ${count} mentions</li>`
+                    ).join('')}
+                </ul>
+                
+                <h4>Summary</h4>
+                <p>${summaryData.summary}</p>
+                
+                <h4>Full Transcript</h4>
+                <div class="transcript">
+                    ${data.transcript.map(turn => 
+                        `<p><strong>${turn.speaker}:</strong> ${turn.text} (${turn.time.toFixed(1)}s)</p>`
+                    ).join('')}
+                </div>
+            `;
+            
+            // Create a modal to display results
+            const modal = document.createElement('div');
+            modal.className = 'analysis-modal';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <span class="close">&times;</span>
+                    ${analysisResults}
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            // Close button functionality
+            modal.querySelector('.close').addEventListener('click', () => {
+                document.body.removeChild(modal);
+            });
+        })
+        .catch(error => {
+            console.error("Error generating summary:", error);
+            alert("Error generating summary. See console for details.");
         });
     })
     .catch(error => {

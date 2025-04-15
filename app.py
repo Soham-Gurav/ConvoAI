@@ -29,7 +29,7 @@ socketio = SocketIO(app)
 #nltk.download('punkt')
 
 # Configure Gemini
-API_KEY = "AIzaSyB6Kr5V4TIwXSUqfUZMWE_xAS0t7tn8lgY"        # Replace with your actual API key
+API_KEY = ""        # Replace with your actual API key
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel("gemini-2.0-flash")
 
